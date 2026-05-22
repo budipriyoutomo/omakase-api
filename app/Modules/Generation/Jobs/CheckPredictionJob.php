@@ -12,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Log;
+
 use Throwable;
 
 class CheckPredictionJob implements ShouldQueue
@@ -250,6 +251,17 @@ class CheckPredictionJob implements ShouldQueue
                 [
                     'generation_id' => $generation->id,
                 ]
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | ANALYZE TYPOGRAPHY
+            |--------------------------------------------------------------------------
+            */
+
+            AnalyzeTypographyJob::dispatch(
+                $generation->id
             );
 
             return;
