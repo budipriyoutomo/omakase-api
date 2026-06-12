@@ -58,6 +58,8 @@ Route::prefix('v1')->name('v1.')->group(function () {
             Route::delete('{id}',   [GenerationController::class, 'destroy'])->name('destroy');
             Route::post('{id}/duplicate',   [GenerationController::class, 'duplicate'])->name('duplicate');
             Route::post('{id}/regenerate',  [GenerationController::class, 'regenerate'])->name('regenerate');
+
+            Route::post('{id}/creative', [GenerationController::class, 'creative'])->name('creative');
         });
 
         // Brand Kit

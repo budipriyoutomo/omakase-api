@@ -13,6 +13,7 @@ use App\Shared\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Http\Response;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 class GenerationController extends Controller
@@ -85,4 +86,23 @@ class GenerationController extends Controller
 
         return $this->success(new GenerationResource($generation));
     }
-}
+
+        // GET /v1/generations/{id}/creative
+    public function creative(string $id): Response | JsonResponse
+    {
+        $user       = JWTAuth::parseToken()->authenticate();
+        $generation = $this->service->getForUser($id, $user->id);
+         
+        $html = data_get($generation->ai_metadata, 'creative_html');
+        if (! $html) {
+                    return response()->json([
+            'message' => 'Creative HTML is not ready yet.',
+        ], 404);
+        }
+
+        return response($html, 200)
+            ->header('Content-Type', 'text/html; charset=UTF-8')
+            ->header('X-Creative-Theme',  data_get($generation->ai_metadata, 'creative_blueprint.theme', ''))
+            ->header('X-Creative-Layout', data_get($generation->ai_metadata, 'creative_blueprint.layout_mode', ''));
+    }
+ }

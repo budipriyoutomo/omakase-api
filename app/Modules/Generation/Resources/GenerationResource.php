@@ -42,6 +42,12 @@ class GenerationResource extends JsonResource
             'previewUrls' => $this->preview_urls ?? [],
             'metadata' => $this->metadata ?? [],
             'aiMetadata' => $this->ai_metadata ?? [],
+
+            // ── Phase 3 & 4 ─────────────────────────────────────────
+            'typographyBlueprint' => data_get($this->ai_metadata, 'typography_blueprint'),
+            'creativeBlueprint'   => data_get($this->ai_metadata, 'creative_blueprint'),
+            'hasCreativeHtml'     => ! empty(data_get($this->ai_metadata, 'creative_html')),
+
             'createdAt' => $this->created_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];

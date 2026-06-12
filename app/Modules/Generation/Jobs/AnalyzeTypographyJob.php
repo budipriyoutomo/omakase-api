@@ -6,6 +6,8 @@ namespace App\Modules\Generation\Jobs;
 
 use App\Ai\DTOs\CampaignPayloadDTO;
 use App\Ai\Typography\Vision\TypographyVisionAnalyzer;
+use App\Ai\Creative\CreativeBlueprintAssembler;
+use App\Ai\Renderers\Html\HtmlCreativeRenderer;
 use App\Models\Generation;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -28,7 +30,9 @@ class AnalyzeTypographyJob implements ShouldQueue
     }
 
     public function handle(
-        TypographyVisionAnalyzer $analyzer
+        TypographyVisionAnalyzer $analyzer,
+        CreativeBlueprintAssembler $assembler,
+        HtmlCreativeRenderer $renderer,
     ): void {
         /*
         |--------------------------------------------------------------------------
@@ -80,9 +84,31 @@ class AnalyzeTypographyJob implements ShouldQueue
         |--------------------------------------------------------------------------
         */
 
-        $blueprint = $analyzer->analyze(
+        $typographyBlueprint = $analyzer->analyze(
             $imageUrl,
             $dto
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | ASSEMBLE CREATIVE BLUEPRINT
+        |--------------------------------------------------------------------------
+        */
+
+        $creativeBlueprint = $assembler->assemble(
+            campaign:   $dto,
+            typography: $typographyBlueprint,
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | RENDER HTML
+        |--------------------------------------------------------------------------
+        */
+
+        $html = $renderer->render(
+            blueprint: $creativeBlueprint,
+            imageUrl:  $imageUrl,
         );
 
         /*
@@ -95,29 +121,45 @@ class AnalyzeTypographyJob implements ShouldQueue
             'ai_metadata' => array_merge(
                 $generation->ai_metadata ?? [],
                 [
-                    'typography_blueprint' => $blueprint->toArray(),
+                    'typography_blueprint' => $typographyBlueprint->toArray(),
+                    'creative_blueprint'   => $creativeBlueprint->toArray(),
+                    'creative_html'       => $html,
                 ]
             ),
         ]);
+ 
+        // ✅ Update pesannya
+        Log::info('AnalyzeTypographyJob: blueprints assembled and saved', [
+            'generation_id' => $generation->id,
+            'theme'         => $creativeBlueprint->theme,
+            'components'    => count($creativeBlueprint->components),
+        ]);
 
-        Log::info(
-            'AnalyzeTypographyJob: typography blueprint saved',
-            [
-                'generation_id' => $generation->id,
-            ]
-        );
     }
+    
+    public function failed(Throwable $exception): void
+    {
+        Log::error('AnalyzeTypographyJob permanently failed', [
+            'generation_id' => $this->generationId,
+            'error'         => $exception->getMessage(),
+        ]);
 
-    public function failed(
-        Throwable $exception
-    ): void {
+        $generation = Generation::find($this->generationId);
 
-        Log::error(
-            'AnalyzeTypographyJob permanently failed',
-            [
-                'generation_id' => $this->generationId,
-                'error'         => $exception->getMessage(),
-            ]
-        );
+        if (! $generation) {
+            return;
+        }
+
+        $generation->update([
+            'ai_metadata' => array_merge(
+                $generation->ai_metadata ?? [],
+                [
+                    'blueprint_error' => [
+                        'message'   => $exception->getMessage(),
+                        'failed_at' => now()->toIso8601String(),
+                    ],
+                ]
+            ),
+        ]);
     }
 }
