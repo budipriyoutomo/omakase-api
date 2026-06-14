@@ -19,6 +19,7 @@ class TemplateResource extends JsonResource
             'name'     => $this->name,
             'category' => $this->category,
             'style'    => $this->style,
+            'payload'  => $this->payload ?? [],
         ];
     }
 }

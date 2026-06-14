@@ -7,6 +7,7 @@ namespace App\Ai\Agents;
 use App\Ai\Campaign\DTOs\CampaignIntelligenceDTO;
 use App\Ai\Contracts\VisualDirector;
 use App\Ai\DTOs\CampaignPayloadDTO;
+use App\Ai\DTOs\FoodEnrichmentDTO;
 use App\Ai\Visual\DTOs\VisualIntelligenceDTO;
 
 final class LuxuryHospitalityDirector implements VisualDirector
@@ -16,7 +17,10 @@ final class LuxuryHospitalityDirector implements VisualDirector
         CampaignIntelligenceDTO $campaign,
         CampaignPayloadDTO $payload
     ): VisualIntelligenceDTO {
-        return $visual->withOverrides([
+        /** @var FoodEnrichmentDTO|null $foodEnrichment */
+        $foodEnrichment = $visual->metadata['food_enrichment'] ?? null;
+
+        $overrides = [
             'heroFocus' => 'premium-food-first-with-hospitality-atmosphere',
             'lighting' => 'soft cinematic side light, polished highlights, controlled deep shadows',
             'negativeSpace' => 'top-right-minimal-premium-space',
@@ -32,6 +36,40 @@ final class LuxuryHospitalityDirector implements VisualDirector
             'metadata' => [
                 'director_role' => 'luxury_hospitality_creative_director',
             ],
-        ]);
+        ];
+
+        if ($foodEnrichment instanceof FoodEnrichmentDTO && $foodEnrichment->enriched) {
+            $foodContext  = $foodEnrichment->toVisualContext();
+            $avoidContext = $foodEnrichment->toNegativeContext();
+            $foodDirectives = [];
+
+            if ($foodContext !== '') {
+                $foodDirectives[] = "Food photography intelligence (KB): {$foodContext}";
+            }
+            if ($avoidContext !== '') {
+                $foodDirectives[] = "Avoid elements: {$avoidContext}";
+            }
+            if ($foodEnrichment->cameraAngle !== '') {
+                $overrides['cameraAngle'] = $foodEnrichment->cameraAngle
+                    . ' | ' . ($visual->cameraAngle !== '' ? $visual->cameraAngle : 'luxury editorial angle');
+            }
+            if (! empty($foodEnrichment->colorPalette)) {
+                $foodDirectives[] = 'Suggested palette: ' . implode(', ', $foodEnrichment->colorPalette);
+            }
+            if ($foodEnrichment->lightingPreset !== '') {
+                $overrides['lighting'] = $foodEnrichment->lightingPreset
+                    . ($overrides['lighting'] !== '' ? '. ' . $overrides['lighting'] : '');
+            }
+            if ($foodEnrichment->platingStyle !== '') {
+                $foodDirectives[] = "Plating style: {$foodEnrichment->platingStyle}";
+            }
+
+            $overrides['commercialDirectives'] = array_merge(
+                $foodDirectives,
+                $overrides['commercialDirectives'],
+            );
+        }
+
+        return $visual->withOverrides($overrides);
     }
 }

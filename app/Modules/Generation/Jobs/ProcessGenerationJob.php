@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Modules\Generation\Jobs;
 
-use App\Ai\DTOs\CampaignPayloadDTO;
 use App\Ai\DTOs\ImageGenerationDTO;
+use App\Ai\DTOs\ImageGenerationPayloadDTO;
+use App\Ai\DTOs\MarketingIntelligencePayloadDTO;
+use App\Ai\Orchestrators\CampaignIntelligenceOrchestrator;
 use App\Ai\Pipelines\AnalyticsPipeline;
 use App\Ai\Pipelines\ImageGenerationPipeline;
 use App\Ai\Pipelines\PromptGenerationPipeline;
 use App\Models\Generation;
-// use App\Modules\Generation\Events\GenerationCompleted;
 use App\Modules\Generation\Events\VisualOrchestrationRendered;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -35,6 +36,7 @@ class ProcessGenerationJob implements ShouldQueue
         PromptGenerationPipeline $promptPipeline,
         ImageGenerationPipeline $imagePipeline,
         AnalyticsPipeline $analyticsPipeline,
+        CampaignIntelligenceOrchestrator $campaignIntelligence,
     ): void {
 
         $generation =
@@ -69,48 +71,40 @@ class ProcessGenerationJob implements ShouldQueue
 
             /*
             |--------------------------------------------------------------------------
-            | BUILD DTO
+            | SPLIT: Image Generation Payload (visual fields only)
             |--------------------------------------------------------------------------
             */
 
-            $dto = new CampaignPayloadDTO(
-
-                campaignType: $generation->campaign_type,
-
-                cuisine: $generation->cuisine ?? '',
-
-                platform: $generation->platform,
-
-                audience: $generation->audience ?? '',
-
-                goal: $generation->goal ?? '',
-
-                mood: $generation->mood ?? '',
-
-                style: $generation->style,
-
-                heroItem: $generation->hero_item ?? '',
-
-                visualStrategy: $generation->visual_strategy ?? '',
-
-                ctaStrategy: $generation->cta_strategy ?? '',
-
-                aspectRatio: $generation->aspect_ratio ?? '',
-
-                prompt: $generation->prompt,
-
-                negativePrompt: $generation->negative_prompt,
-            );
+            $imagePayload = ImageGenerationPayloadDTO::fromGeneration($generation);
 
             /*
             |--------------------------------------------------------------------------
-            | GENERATE ENHANCED PROMPT
+            | MARKETING INTELLIGENCE (diproses terpisah, tidak masuk prompt image)
+            |--------------------------------------------------------------------------
+            */
+
+            $marketingPayload = MarketingIntelligencePayloadDTO::fromGeneration($generation);
+            $marketingIntelligence = null;
+
+            try {
+                $marketingIntelligence = $campaignIntelligence->buildFromMarketing($marketingPayload);
+                $marketingIntelligence = $marketingIntelligence->toArray();
+            } catch (\Throwable $e) {
+                Log::warning('Marketing intelligence build failed (non-blocking)', [
+                    'generation_id' => $this->generationId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | GENERATE ENHANCED PROMPT (image-only, tanpa marketing fields)
             |--------------------------------------------------------------------------
             */
 
             $result =
-                $promptPipeline->handle(
-                    $dto
+                $promptPipeline->handleForImage(
+                    $imagePayload
                 );
 
             VisualOrchestrationRendered::dispatch(
@@ -129,9 +123,9 @@ class ProcessGenerationJob implements ShouldQueue
                     prompt: $result['enhanced_prompt'],
 
                     negativePrompt: $result['negative_prompt']
-                        ?? $dto->negativePrompt,
+                        ?? $imagePayload->negativePrompt,
 
-                    aspectRatio: $dto->aspectRatio,
+                    aspectRatio: $imagePayload->aspectRatio,
 
                     numImages: 1,
                 )
@@ -149,6 +143,27 @@ class ProcessGenerationJob implements ShouldQueue
             | SAVE RESULT
             |--------------------------------------------------------------------------
             */
+
+            $aiMetadata = array_merge(
+                $generation->ai_metadata ?? [],
+                [
+                    'replicate_prediction' => $imageResult,
+                    'visual_orchestration_lifecycle' => $result['orchestration'],
+                ]
+            );
+
+            // Simpan marketing intelligence ke ai_metadata (jika berhasil diproses)
+            if ($marketingIntelligence !== null) {
+                $aiMetadata['marketing_intelligence'] = $marketingIntelligence;
+            }
+
+            // ── Extract food_enrichment to top-level ai_metadata for direct SQL querying ──
+            $foodEnrichment = data_get($result, 'orchestration.visual_intelligence.metadata.food_enrichment');
+            if ($foodEnrichment !== null) {
+                $aiMetadata['food_enrichment'] = $foodEnrichment instanceof \App\Ai\DTOs\FoodEnrichmentDTO
+                    ? $foodEnrichment->toArray()
+                    : (is_array($foodEnrichment) ? $foodEnrichment : null);
+            }
 
             $generation->update([
                 'enhanced_prompt' => $result['enhanced_prompt'],
@@ -169,13 +184,7 @@ class ProcessGenerationJob implements ShouldQueue
 
                 'raw_response' => $result['raw_response'],
 
-                'ai_metadata' => array_merge(
-                    $generation->ai_metadata ?? [],
-                    [
-                        'replicate_prediction' => $imageResult,
-                        'visual_orchestration_lifecycle' => $result['orchestration'],
-                    ]
-                ),
+                'ai_metadata' => $aiMetadata,
 
                 'metadata' => array_merge(
                     $generation->metadata ?? [],

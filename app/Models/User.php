@@ -69,4 +69,14 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->hasOne(UserSubscription::class);
     }
+
+    public function socialAccounts(): HasMany
+    {
+        return $this->hasMany(SocialAccount::class);
+    }
+
+    public function scheduledPosts(): HasMany
+    {
+        return $this->hasMany(ScheduledPost::class);
+    }
 }

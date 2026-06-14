@@ -7,7 +7,9 @@ namespace App\Providers;
 use App\Ai\Contracts\ImagePredictionProvider;
 use App\Ai\Contracts\ImageProvider;
 use App\Ai\Providers\ReplicateProvider;
+use App\Ai\Visual\Support\FoodEnrichmentResolver;
 use App\Modules\Generation\Services\GeminiAiService;
+use App\Services\AI\FoodKnowledgeService;
 use App\Shared\Contracts\AiServiceInterface;
 use Illuminate\Support\ServiceProvider;
 
@@ -22,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AiServiceInterface::class, GeminiAiService::class);
         $this->app->bind(ImageProvider::class, ReplicateProvider::class);
         $this->app->bind(ImagePredictionProvider::class, ReplicateProvider::class);
+
+        // Food Knowledge Base + Enrichment Resolver (singleton for cache efficiency)
+        $this->app->singleton(FoodKnowledgeService::class);
+        $this->app->singleton(FoodEnrichmentResolver::class);
     }
 
     public function boot(): void

@@ -48,6 +48,9 @@ class GenerationResource extends JsonResource
             'creativeBlueprint'   => data_get($this->ai_metadata, 'creative_blueprint'),
             'hasCreativeHtml'     => ! empty(data_get($this->ai_metadata, 'creative_html')),
 
+            // ── Marketing Intelligence (diproses terpisah dari image generation) ──
+            'marketingIntelligence' => data_get($this->ai_metadata, 'marketing_intelligence'),
+
             'createdAt' => $this->created_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];

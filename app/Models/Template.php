@@ -16,11 +16,13 @@ class Template extends Model
         'category',
         'style',
         'description',
+        'payload',
         'is_trending',
     ];
 
     protected $casts = [
         'is_trending' => 'boolean',
+        'payload' => 'array',
     ];
 
     public function scopeTrending(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder

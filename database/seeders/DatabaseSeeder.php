@@ -15,6 +15,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             SubscriptionPlanSeeder::class,
             TemplateSeeder::class,
+            FoodCategorySeeder::class,
+            CuisineStyleSeeder::class,
+            CampaignContextSeeder::class,
         ]);
     }
 }

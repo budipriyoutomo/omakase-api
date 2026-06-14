@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 class GenerationController extends Controller
@@ -105,4 +106,165 @@ class GenerationController extends Controller
             ->header('X-Creative-Theme',  data_get($generation->ai_metadata, 'creative_blueprint.theme', ''))
             ->header('X-Creative-Layout', data_get($generation->ai_metadata, 'creative_blueprint.layout_mode', ''));
     }
- }
+
+    /**
+     * POST /v1/generations/{id}/creative/render
+     * Re-render creative HTML dengan custom typography (dari preview editor).
+     */
+    public function renderCreative(Request $request, string $id): JsonResponse
+    {
+        $user = JWTAuth::parseToken()->authenticate();
+        $generation = $this->service->getForUser($id, $user->id);
+
+        $creativeBlueprint = data_get($generation->ai_metadata, 'creative_blueprint');
+        if (!$creativeBlueprint) {
+            return $this->error('Creative blueprint not available yet.', 404);
+        }
+
+        $imageUrl = $generation->image_url;
+        if (!$imageUrl) {
+            return $this->error('Image not available yet.', 404);
+        }
+
+        try {
+            // Merge custom typography overrides into creative blueprint
+            $customTypography = $request->input('typography', []);
+
+            // Update component content & styles based on custom typography
+            if (!empty($customTypography)) {
+                $components = $creativeBlueprint['components'] ?? [];
+                foreach ($components as &$component) {
+                    $type = $component['type'] ?? '';
+
+                    if ($type === 'hero_headline' && isset($customTypography['headline'])) {
+                        $h = $customTypography['headline'];
+                        if (isset($h['text'])) {
+                            $component['content'] = $h['text'];
+                        }
+                        if (isset($h['font_size'])) {
+                            $component['styles']['font-size'] = $h['font_size'];
+                        }
+                        if (isset($h['font_family'])) {
+                            $component['styles']['font-family'] = $h['font_family'];
+                        }
+                        if (isset($h['position'])) {
+                            $component['position'] = $h['position'];
+                        }
+                    }
+
+                    if ($type === 'sub_headline' && isset($customTypography['subheadline'])) {
+                        $s = $customTypography['subheadline'];
+                        if (isset($s['text'])) {
+                            $component['content'] = $s['text'];
+                        }
+                        if (isset($s['font_size'])) {
+                            $component['styles']['font-size'] = $s['font_size'];
+                        }
+                        if (isset($s['position'])) {
+                            $component['position'] = $s['position'];
+                        }
+                    }
+
+                    if ($type === 'luxury_cta' && isset($customTypography['cta'])) {
+                        $c = $customTypography['cta'];
+                        if (isset($c['text'])) {
+                            $component['content'] = $c['text'];
+                        }
+                        if (isset($c['font_size'])) {
+                            $component['styles']['font-size'] = $c['font_size'];
+                        }
+                        if (isset($c['position'])) {
+                            $component['position'] = $c['position'];
+                        }
+                    }
+                }
+                unset($component);
+                $creativeBlueprint['components'] = $components;
+
+                // Update tokens typography if custom fonts specified
+                if (isset($customTypography['font_pairing'])) {
+                    $fp = $customTypography['font_pairing'];
+                    if (isset($fp['headline'])) {
+                        $creativeBlueprint['tokens']['typography']['headline_font'] = $fp['headline'];
+                    }
+                    if (isset($fp['body'])) {
+                        $creativeBlueprint['tokens']['typography']['body_font'] = $fp['body'];
+                    }
+                }
+            }
+
+            // Re-render HTML using CreativeBlueprintAssembler & HtmlCreativeRenderer
+            $blueprintDTO = new \App\Ai\Creative\Blueprints\CreativeBlueprintDTO(
+                theme: $creativeBlueprint['theme'] ?? '',
+                layoutMode: $creativeBlueprint['layout_mode'] ?? '',
+                canvas: $creativeBlueprint['canvas'] ?? [],
+                tokens: $creativeBlueprint['tokens'] ?? [],
+                components: $creativeBlueprint['components'] ?? [],
+                overlayStrategy: $creativeBlueprint['overlay_strategy'] ?? [],
+            );
+
+            $renderer = app(\App\Ai\Renderers\Html\HtmlCreativeRenderer::class);
+            $html = $renderer->render($blueprintDTO, $imageUrl);
+
+            // ── Persist ALL edits back to database so they survive page refresh ──
+            $aiMetadata = $generation->ai_metadata ?? [];
+            $aiMetadata['creative_blueprint'] = $creativeBlueprint;
+            $aiMetadata['creative_html'] = $html;
+
+            // Also persist typography_blueprint edits so Typography tab reflects edits
+            if (!empty($customTypography)) {
+                $typographyBlueprint = $aiMetadata['typography_blueprint'] ?? [];
+
+                if (isset($customTypography['headline'])) {
+                    $h = $customTypography['headline'];
+                    if (isset($h['text']))       $typographyBlueprint['headline']['text']       = $h['text'];
+                    if (isset($h['font_size']))  $typographyBlueprint['headline']['font_size']  = $h['font_size'];
+                    if (isset($h['font_family'])) $typographyBlueprint['headline']['font_family'] = $h['font_family'];
+                    if (isset($h['position']))    $typographyBlueprint['headline']['safe_area']   = [
+                        'x' => $h['position']['x'] ?? 300,
+                        'y' => $h['position']['y'] ?? 300,
+                    ];
+                }
+
+                if (isset($customTypography['subheadline'])) {
+                    $s = $customTypography['subheadline'];
+                    if (isset($s['text']))       $typographyBlueprint['subheadline']['text']       = $s['text'];
+                    if (isset($s['font_size']))  $typographyBlueprint['subheadline']['font_size']  = $s['font_size'];
+                }
+
+                if (isset($customTypography['cta'])) {
+                    $c = $customTypography['cta'];
+                    if (isset($c['text']))       $typographyBlueprint['cta']['text']       = $c['text'];
+                    if (isset($c['font_size']))  $typographyBlueprint['cta']['font_size']  = $c['font_size'];
+                }
+
+                if (isset($customTypography['font_pairing'])) {
+                    $fp = $customTypography['font_pairing'];
+                    $typographyBlueprint['font_pairing'] = array_merge(
+                        $typographyBlueprint['font_pairing'] ?? [],
+                        array_filter([
+                            'headline' => $fp['headline'] ?? null,
+                            'body'     => $fp['body']     ?? null,
+                        ], fn($v) => $v !== null),
+                    );
+                }
+
+                $aiMetadata['typography_blueprint'] = $typographyBlueprint;
+            }
+
+            $generation->update(['ai_metadata' => $aiMetadata]);
+
+            return $this->success([
+                'html' => $html,
+                'creative_blueprint' => $creativeBlueprint,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('renderCreative failed', [
+                'generation_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->error('Failed to render creative: ' . $e->getMessage(), 500);
+        }
+    }
+}
